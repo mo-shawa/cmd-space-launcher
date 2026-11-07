@@ -35,6 +35,24 @@ struct SearchIndex: Decodable {
 struct Selection: Encodable {
     let bundleID: String
     let shortQuery: String?
+    let windows: WindowHints?
+}
+
+struct WindowHints: Encodable {
+    let pid: pid_t
+    let ids: [CGWindowID]
+
+    init?(bundleID: String) {
+        guard let app = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).first,
+              let rows = CGWindowListCopyWindowInfo([.optionAll, .excludeDesktopElements], 0) as? [[String: Any]] else { return nil }
+        pid = app.processIdentifier
+        // Accessibility can omit an app's windows while their display shows another Space.
+        ids = rows.compactMap { row in
+            guard row[kCGWindowOwnerPID as String] as? pid_t == app.processIdentifier,
+                  row[kCGWindowLayer as String] as? Int == 0 else { return nil }
+            return row[kCGWindowNumber as String] as? CGWindowID
+        }
+    }
 }
 
 final class SearchPanel: NSPanel {
@@ -270,7 +288,8 @@ final class Launcher: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTextF
         finishing = true
         panel.orderOut(nil)
         if let bundleID {
-            let selection = Selection(bundleID: bundleID, shortQuery: (1...4).contains(query.count) ? query : nil)
+            let selection = Selection(bundleID: bundleID, shortQuery: (1...4).contains(query.count) ? query : nil,
+                                      windows: WindowHints(bundleID: bundleID))
             if let data = try? JSONEncoder().encode(selection) { FileHandle.standardOutput.write(data) }
         }
         NSApp.terminate(nil)

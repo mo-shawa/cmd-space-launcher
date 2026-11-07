@@ -75,17 +75,51 @@ local function targetWindow(app)
   return minimized
 end
 
-local function goTo(choice)
+-- A window can belong to more than one Space. A Space on any visible display counts.
+local function windowSpace(id, active)
+  if not id or not active then return end
+  local spaces = hs.spaces.windowSpaces(id) or {}
+  for _, space in ipairs(spaces) do
+    for _, visible in pairs(active) do
+      if space == visible then return space, true end
+    end
+  end
+  if spaces[1] then return spaces[1], false end
+end
+
+local function locateWindow(id, window, hints)
+  local active = hs.spaces.activeSpaces()
+  local space, visible = windowSpace(id, active)
+  if space then return id, space, visible end
+  if window and window:id() ~= id then
+    id = window:id()
+    space, visible = windowSpace(id, active)
+    if space then return id, space, visible end
+  end
+  for _, candidate in ipairs(hints and hints.ids or {}) do
+    space, visible = windowSpace(candidate, active)
+    if space then return candidate, space, visible end
+  end
+  return id
+end
+
+local function goTo(choice, hints)
   cancelPendingFocus()
   if not choice then return end
   local bid = choice.bundleID
-  local app = hs.application.get(bid)
+  local app = hints and hs.application.applicationForPID(hints.pid)
+  if not app or app:bundleID() ~= bid then
+    app = hs.application.applicationsForBundleID(bid)[1]
+    hints = nil
+  end
 
   if not app then
     hs.application.launchOrFocusByBundleID(bid)
     return
   end
 
+  local preferred = targetWindow(app)
+  local targetID = preferred and preferred:id()
   app:activate()
   -- A click or keypress starts a new action. Let it take precedence over a delayed raise.
   local events = hs.eventtap.event.types
@@ -95,9 +129,35 @@ local function goTo(choice)
     return false
   end):start()
 
+  local switched, waitUntil
   local function raiseWindow(final)
     if not app:isRunning() then cancelPendingFocus(); return end
-    local window = targetWindow(app)
+    local window = targetWindow(app) or preferred
+    local space, visible
+    targetID, space, visible = locateWindow(targetID, window, hints)
+    if space and not switched then
+      local wrongDisplay = final and hs.spaces.focusedSpace() ~= space and not app:isFrontmost()
+      if not visible or wrongDisplay then
+        switched = true
+        local ok, err = hs.spaces.gotoSpace(space)
+        if ok then
+          waitUntil = hs.timer.secondsSinceEpoch() + 1.5
+          focusTimer = hs.timer.doAfter(0.2, function() raiseWindow(false) end)
+          return
+        end
+        hs.spaces.closeMissionControl()
+        print("App Search: could not switch to Space " .. space .. ": " .. tostring(err))
+      end
+    end
+    if waitUntil and space and not visible and hs.timer.secondsSinceEpoch() < waitUntil then
+      focusTimer = hs.timer.doAfter(0.15, function() raiseWindow(false) end)
+      return
+    end
+    if targetID and (not window or window:id() ~= targetID) then
+      for _, candidate in ipairs(app:allWindows()) do
+        if candidate:id() == targetID then window = candidate; break end
+      end
+    end
     if window then
       if window:isMinimized() then window:unminimize() end
       window:focus()
@@ -156,7 +216,7 @@ local hotkey = hs.hotkey.bind({ "cmd" }, "space", function()
     for _, choice in ipairs(choices) do
       if choice.bundleID == selection.bundleID then
         remember(choice.bundleID, selection.shortQuery)
-        goTo(choice)
+        goTo(choice, selection.windows)
         return
       end
     end
