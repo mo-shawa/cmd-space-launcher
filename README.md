@@ -1,26 +1,28 @@
 # Cmd-Space Launcher
 
-A keyboard app launcher for macOS. Hammerspoon handles Cmd-Space and brings windows forward across Spaces. A small native AppKit panel handles search.
+A native app switcher for macOS. Press **⌘Space**, type a few letters, and hit **Return**.
+
+## Why I built it
+
+I wanted to get back to WhatsApp the way I use ⌘Tab, except I wanted to type its name. If its window is on another Space, `wha` and Return should take me there and bring that window to the front. If the window is minimized, the launcher restores it. If the app is closed, it opens it.
+
+Spotlight searches files as well as apps, and Raycast puts apps alongside commands and extensions. For ⌘Space I wanted a short list of apps in a native search field that I could tune to my own habits. I can type `codex` for ChatGPT, teach `w` to mean WhatsApp, or press ↓ to get back to an app I just used.
 
 ## Install
 
-Tested on Apple silicon with macOS 15.6.1 and Hammerspoon 1.1.1. To install from Terminal, run
+On a Mac with Homebrew and the Xcode Command Line Tools, run
 
 ```sh
-git clone https://github.com/mo-shawa/cmd-space-launcher.git
-cd cmd-space-launcher
-./install.command --configure-macos
-open -a Hammerspoon
+brew install --cask mo-shawa/tap/cmd-space-launcher
 ```
 
-The installer builds the panel for that Mac using Swift from Xcode or the Xcode Command Line Tools. If needed, run `xcode-select --install`, finish that installation, and retry. If Hammerspoon is missing from Applications, the installer uses `brew install --cask hammerspoon`. Install Homebrew or Hammerspoon first if neither is present.
+Homebrew installs Hammerspoon, builds the panel for your Mac, and opens Hammerspoon. The installer frees ⌘Space by disabling Spotlight’s shortcut and enables the macOS setting that switches to a Space with open windows for the selected app. It backs up existing Spotlight preferences before editing them. If the developer tools are missing, run `xcode-select --install`, let it finish, and retry.
 
-`--configure-macos` turns off Spotlight’s Cmd-Space shortcut and enables switching to a Space containing the selected app’s windows. It backs up existing Spotlight preferences before editing them. Omit the flag to manage those settings yourself.
+1. Grant Hammerspoon access in **System Settings → Privacy & Security → Accessibility**.
+2. If Raycast uses ⌘Space, clear **Raycast Settings → General → Raycast Hotkey**, or quit Raycast.
+3. If Hammerspoon was already running, choose **Reload Config** from its menu bar icon. The launcher enables Hammerspoon at login and hides its Dock icon.
 
-1. If Hammerspoon was already running, choose **Reload Config** in its menu. The launcher enables Hammerspoon at login and hides its Dock icon. Its menu bar icon stays available.
-2. Enable Hammerspoon in **System Settings → Privacy & Security → Accessibility**.
-3. If Raycast also uses Cmd-Space, clear **Raycast Settings → General → Raycast Hotkey**, or quit Raycast.
-4. Press **Cmd-Space**, type an app name, and press **Return**.
+Tested on Apple silicon with macOS 15.6.1 and Hammerspoon 1.1.1.
 
 ## Use
 
@@ -32,8 +34,10 @@ The launcher stores up to 128 learned queries and 12 recent bundle IDs in this M
 
 ## Update or remove
 
-Pull the latest commit or extract a newer ZIP, then rerun `./install.command` and reload Hammerspoon. History survives updates. The installer keeps the source and executable under `~/.hammerspoon/.cmd-space-launcher/` and links the active release as `~/.hammerspoon/CmdSpaceLauncher`.
+To update, run `brew upgrade --cask mo-shawa/tap/cmd-space-launcher` and reload Hammerspoon. Your history survives updates.
 
-On a Mac with an existing `~/.hammerspoon/init.lua`, the installer backs up the file and adds one loader line. It migrates known, unmodified versions of the earlier standalone launcher. If your config is a symlink, the installer prints the line to add to your dotfiles. If you customized an earlier Cmd-Space binding, remove that binding when switching to this one.
+To uninstall, run `brew uninstall --cask mo-shawa/tap/cmd-space-launcher` and reload Hammerspoon. You can re-enable Spotlight under **System Settings → Keyboard → Keyboard Shortcuts → Spotlight**. The Space-switching preference is under **System Settings → Desktop & Dock → Mission Control**.
 
-To disable the launcher, remove `require("CmdSpaceLauncher.launcher")` from `~/.hammerspoon/init.lua` and reload Hammerspoon. You can re-enable Spotlight under **System Settings → Keyboard → Keyboard Shortcuts → Spotlight**. Installer backups live under `~/.hammerspoon/.cmd-space-launcher/`.
+The installer backs up an existing `~/.hammerspoon/init.lua` before adding its loader. Backups live under `~/.hammerspoon/.cmd-space-launcher/`. If your config is a symlink, follow the installer’s instructions to add the loader to your dotfiles. If you customized an earlier ⌘Space binding, remove that binding when switching to this one.
+
+For a source install, run `./install.command` in a checkout. Add `--configure-macos` to apply the same Spotlight and Space settings as the cask. Open Hammerspoon or reload its config afterward.

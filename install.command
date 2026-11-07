@@ -30,7 +30,9 @@ def prepare_config():
     init = CONFIG / "init.lua"
     if init.is_symlink():
         print("Your init.lua is a symlink. Add this line in your dotfiles if needed:")
-        print(LOADER.decode())
+        print('if hs.fs.attributes(hs.configdir .. "/CmdSpaceLauncher/launcher.lua") then')
+        print("  " + LOADER.decode())
+        print("end")
         return None, None
     original = init.read_bytes() if init.exists() else None
     data = original or b""
@@ -49,18 +51,47 @@ def prepare_config():
     return original, prefix + LOADER + b"\n" + data
 
 
+def write_config(stage, original, updated):
+    if updated == original:
+        return
+    init = CONFIG / "init.lua"
+    if original is not None:
+        backup_dir = Path(tempfile.mkdtemp(prefix="init-backup-", dir=STORE))
+        backup = backup_dir / "init.lua"
+        shutil.copy2(init, backup)
+        if backup.read_bytes() != original:
+            sys.exit("init.lua changed during setup. Run the command again.")
+        print("Backed up the previous configuration to", backup)
+    new_init = stage / "init.lua"
+    new_init.write_bytes(updated)
+    if original is not None:
+        shutil.copymode(init, new_init)
+    if init.is_symlink() or (init.read_bytes() if init.exists() else None) != original:
+        sys.exit("init.lua changed during setup. Run the command again.")
+    os.replace(new_init, init)
+
+
+def release_name(source):
+    digest = hashlib.sha256(platform.machine().encode())
+    for filename in ("Launcher.swift", "launcher.lua"):
+        digest.update((source / filename).read_bytes())
+    return "release-" + digest.hexdigest()[:16]
+
+
+def check_link():
+    if os.path.lexists(LINK) and not (LINK.is_symlink() and LINK.resolve().parent == STORE.resolve()
+                                      and LINK.resolve().name.startswith("release-")):
+        sys.exit(f"{LINK} already exists and belongs to another installation.")
+
+
 def install():
     STORE.mkdir(parents=True, exist_ok=True)
     with (STORE / "install.lock").open("a") as lock, tempfile.TemporaryDirectory(dir=STORE) as temp:
         fcntl.flock(lock, fcntl.LOCK_EX)
         stage = Path(temp)
-        if os.path.lexists(LINK) and not (LINK.is_symlink() and LINK.resolve().parent == STORE.resolve()):
-            sys.exit(f"{LINK} already exists and belongs to another installation.")
+        check_link()
         original, updated = prepare_config()
-        digest = hashlib.sha256(platform.machine().encode())
-        for filename in ("Launcher.swift", "launcher.lua"):
-            digest.update((SOURCE / filename).read_bytes())
-        release = STORE / ("release-" + digest.hexdigest()[:16])
+        release = STORE / release_name(SOURCE)
         if not release.exists():
             build = stage / "release"
             build.mkdir()
@@ -69,26 +100,39 @@ def install():
             subprocess.run(["xcrun", "swiftc", "-O", str(build / "Launcher.swift"),
                             "-o", str(build / "AppSearch")], check=True)
             build.rename(release)
-        init = CONFIG / "init.lua"
-        if updated != original:
-            if original is not None:
-                backup_dir = Path(tempfile.mkdtemp(prefix="init-backup-", dir=STORE))
-                backup = backup_dir / "init.lua"
-                shutil.copy2(init, backup)
-                if backup.read_bytes() != original:
-                    sys.exit("init.lua changed during install. Run the installer again.")
-                print("Backed up the previous configuration to", backup)
-            new_init = stage / "init.lua"
-            new_init.write_bytes(updated)
-            if original is not None:
-                shutil.copymode(init, new_init)
-            if init.is_symlink() or (init.read_bytes() if init.exists() else None) != original:
-                sys.exit("init.lua changed during install. Run the installer again.")
         next_link = stage / "link"
         next_link.symlink_to(release.relative_to(CONFIG))
         os.replace(next_link, LINK)
-        if updated != original:
-            os.replace(new_init, init)
+        write_config(stage, original, updated)
+
+
+def uninstall():
+    if not STORE.is_dir():
+        return
+    with (STORE / "install.lock").open("a") as lock, tempfile.TemporaryDirectory(dir=STORE) as temp:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        check_link()
+        init = CONFIG / "init.lua"
+        if init.is_symlink():
+            print("If you manually added an unconditional launcher require to your dotfiles, remove it.")
+        elif init.is_file():
+            original = init.read_bytes()
+            bom = b"\xef\xbb\xbf" if original.startswith(b"\xef\xbb\xbf") else b""
+            lines = original[len(bom):].splitlines(keepends=True)
+            updated = bom + b"".join(line for line in lines if line.strip() != LOADER)
+            write_config(Path(temp), original, updated)
+        if LINK.is_symlink():
+            LINK.unlink()
+        # Preserve edited releases and extra files alongside our config backups.
+        for release in STORE.glob("release-*"):
+            if release.is_symlink() or not release.is_dir():
+                continue
+            files = list(release.iterdir())
+            if {p.name for p in files} != {"AppSearch", "Launcher.swift", "launcher.lua"}:
+                continue
+            if all(p.is_file() and not p.is_symlink() for p in files) and release.name == release_name(release):
+                shutil.rmtree(release)
+    print("Reload Hammerspoon to release Cmd-Space. Your backups and history are in place.")
 
 
 def configure_macos():
@@ -130,22 +174,31 @@ def configure_macos():
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--configure-macos", action="store_true",
-                        help="disable Spotlight's Cmd-Space shortcut and enable automatic Space switching")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--configure-macos", action="store_true",
+                      help="disable Spotlight's Cmd-Space shortcut and enable automatic Space switching")
+    mode.add_argument("--homebrew", action="store_true",
+                      help="use the Hammerspoon cask dependency, configure Cmd-Space and open Hammerspoon")
+    mode.add_argument("--uninstall", action="store_true", help="remove the launcher and its loader line")
     args = parser.parse_args()
     if sys.platform != "darwin":
         sys.exit("Cmd-Space Launcher requires macOS.")
+    if args.uninstall:
+        uninstall()
+        return
     if subprocess.run(["xcrun", "--find", "swiftc"], capture_output=True).returncode:
         sys.exit("Install the Xcode Command Line Tools with xcode-select --install, then run this again.")
-    if not Path("/Applications/Hammerspoon.app").is_dir():
+    if not args.homebrew and not Path("/Applications/Hammerspoon.app").is_dir():
         brew = shutil.which("brew") or next((p for p in ("/opt/homebrew/bin/brew", "/usr/local/bin/brew")
                                               if os.access(p, os.X_OK)), None)
         if not brew:
             sys.exit("Hammerspoon is missing and Homebrew is not installed. Install either, then run this again.")
         subprocess.run([brew, "install", "--cask", "hammerspoon"], check=True)
     install()
-    if args.configure_macos:
+    if args.configure_macos or args.homebrew:
         configure_macos()
+    if args.homebrew:
+        subprocess.run(["open", "-a", "Hammerspoon"], check=True)
     print("Launcher installed. Open Hammerspoon or choose Reload Config in its menu.")
     print("Grant Hammerspoon Accessibility access and clear any Raycast Cmd-Space shortcut.")
 
