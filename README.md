@@ -4,9 +4,9 @@ A native app switcher for macOS. Press **⌘Space**, type a few letters, and hit
 
 ## Why I built it
 
-I wanted to get back to WhatsApp the way I use ⌘Tab, except I wanted to type its name. If its window is on another Space, `wha` and Return should take me there and bring that window to the front. If the window is minimized, the launcher restores it. If the app is closed, it opens it.
+I wanted to switch between apps by typing a few letters of their names. Opening a closed app worked. The frustrating part was getting back to one that was already running. Sometimes macOS switched to the right Space and left the window behind another one.
 
-Spotlight searches files as well as apps, and Raycast puts apps alongside commands and extensions. For ⌘Space I wanted a short list of apps in a native search field that I could tune to my own habits. I can type `codex` for ChatGPT, teach `w` to mean WhatsApp, or press ↓ to get back to an app I just used.
+Spotlight searches across my Mac, and Raycast offers commands and extensions. What I wanted from ⌘Space was simpler. I type an app’s name and press Return. If it’s running, the launcher brings its window forward, switching Spaces or restoring a minimized window as needed. If it’s closed, it opens.
 
 ## Install
 
@@ -27,7 +27,7 @@ Tested on Apple silicon with macOS 15.6.1 and Hammerspoon 1.1.1.
 ## Use
 
 - Type a name or abbreviation to search. Use ↑ and ↓ to move, Return to open, and Escape to dismiss. Typing `codex` finds ChatGPT.
-- Pick an app for a query of one to four characters to remember that choice. For example, choose WhatsApp for `w`; next time it appears first for `w`. Picking another match for the same query updates the preference.
+- When you pick an app after typing one to four characters, it comes first the next time you type those same characters. Choosing a different match updates that preference.
 - Press ↓ in an empty search to see your last 12 distinct launcher picks, newest first. The first ↓ selects the most recent app. Press Return to open it, or start typing to search normally.
 
 The launcher stores up to 128 learned queries and 12 recent bundle IDs in this Mac’s Hammerspoon settings. Dismissing the panel records nothing. To clear both lists, run `hs.settings.clear("CmdSpaceLauncher.history.v1")` in the Hammerspoon Console.
