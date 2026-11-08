@@ -11,7 +11,8 @@ local function scenario(mode, opts)
       focus=function() assert(loc[id]==1);focus=id end, raise=function() end}
   end
   local app = {pid=function() return 100 end, isRunning=function() return true end,
-    focusedWindow=function() end, mainWindow=function() end,
+    isFrontmost=function() return focus~=nil end,
+    focusedWindow=function() return focus and window(focus) end, mainWindow=function() end,
     allWindows=function()
       local wins={}; for id,space in pairs(loc) do if space==1 then table.insert(wins,window(id)) end end; return wins
     end,

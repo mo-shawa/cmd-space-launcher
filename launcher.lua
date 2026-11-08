@@ -98,8 +98,8 @@ local function targetWindow(app)
   if id and id > 0 and preferred:isVisible() then return preferred end
   local minimized
   for _, window in ipairs(app:allWindows()) do
-    if window:id() and window:isStandard() then
-      if window:isVisible() then return window end
+    if (window:id() or 0) > 0 then
+      if window:isStandard() and window:isVisible() then return window end
       if window:isMinimized() and not minimized then minimized = window end
     end
   end
@@ -141,7 +141,7 @@ local function goTo(choice, hints, mode, origin)
   local app = hints and hs.application.applicationForPID(hints.pid)
   if not app or app:bundleID() ~= bid then
     app = hs.application.applicationsForBundleID(bid)[1]
-    hints = nil
+    if not app or not hints or hints.pid ~= app:pid() then hints = nil end
   end
 
   if mode == "new" or mode == "bring" then
@@ -154,7 +154,7 @@ local function goTo(choice, hints, mode, origin)
   end
 
   if not app then
-    hs.application.launchOrFocusByBundleID(bid)
+    if not hs.application.launchOrFocusByBundleID(bid) then hs.alert.show("Could not open " .. choice.text) end
     return
   end
 
@@ -167,7 +167,7 @@ local function goTo(choice, hints, mode, origin)
   local switched, waitUntil
   local function raiseWindow(final)
     if not app:isRunning() then cancelPendingFocus(); return end
-    local window = targetWindow(app) or preferred
+    local window = targetWindow(app)
     local space, visible
     targetID, space, visible = locateWindow(targetID, window, hints)
     if space and not switched then
@@ -198,7 +198,8 @@ local function goTo(choice, hints, mode, origin)
       window:focus()
       window:raise()
     elseif final then
-      hs.task.new("/usr/bin/open", nil, {"-b", bid}):start()
+      local task = hs.task.new("/usr/bin/open", nil, {"-b", bid})
+      if not task or not task:start() then hs.alert.show("Could not reopen " .. choice.text) end
     end
     if final then
       cancelPendingFocus()

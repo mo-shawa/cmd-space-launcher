@@ -42,11 +42,11 @@ Search for an app and highlight it. Click the gear or press **⌘,**. Click a ch
 | --- | --- |
 | **1 · Switch to the app** | The default. Go to its existing window, even on another Space. |
 | **2 · Open a new window here** | Ask the running app for a new window and bring that window to the desktop where you pressed ⌘Space. For example, open a fresh Finder window and leave the old one where it was. |
-| **3 · Bring an existing window here** | Bring one existing window to this desktop, preferring the app’s focused window. Other windows stay where they are. If the app has no window, ask it to reopen. |
+| **3 · Bring an existing window here** | Bring the app’s focused window here, or another existing window if available. If there’s no window to bring, open one here. For Finder, this opens a folder window when the last one is closed. |
 
-**⌥Return** uses the normal switch once without changing your saved choice. For a closed app, all three choices launch it once; the app controls any session it restores.
+**⌥Return** uses the normal switch once without changing your saved choice. For a closed app, all three choices launch it once. In bring mode, the launcher gives the app time to restore its windows. If it still has none, the launcher asks it to reopen.
 
-You can opt in for any app. New-window mode looks for an enabled **File → New Window** (or Finder’s **New Finder Window**) in English. Apps that use a different menu title, open tabs, or only support one window may not work. The launcher tells you when it can’t complete the action. Both “here” modes need a regular desktop; they don’t force windows into or out of full screen or Split View. Moving windows uses macOS’s private Spaces interfaces, which can change between OS releases. The launcher checks the window actually arrived before focusing it.
+You can opt in for any app. New-window mode looks for an enabled **File → New Window** (or Finder’s **New Finder Window**) in English. Apps that use a different menu title, open tabs, or only support one window may not work. In bring mode, the launcher can also ask the app to reopen, like clicking its Dock icon. The launcher tells you when it can’t complete the action. Moving a window requires a regular desktop. From full screen or Split View, a closed app can still launch and a windowless app in bring mode can still open a window on the desktop macOS chooses. Moving windows uses macOS’s private Spaces interfaces, which can change between OS releases. The launcher checks the window actually arrived before focusing it.
 
 The single-window move fallback uses the SkyLight operation documented by [ferry](https://github.com/softmaxe/ferry) and [yabai](https://github.com/asmvik/yabai). It does not require either tool or changes to System Integrity Protection.
 

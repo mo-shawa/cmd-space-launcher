@@ -1,6 +1,6 @@
 -- Run from the repo root with lua tests/space-switch.lua.
 -- The source display stays on Space 10. The app's window lives on Space 21.
-local function selectApp(startSpace, cancel)
+local function selectApp(startSpace, cancel, missedPID)
   local space, switches, raises = startSpace, 0, 0
   local pending, stopped, bind, selected, input, switching
   local window = {
@@ -14,6 +14,7 @@ local function selectApp(startSpace, cancel)
     if space == 21 then return window end
   end
   local app = {
+    pid = function() return 123 end,
     bundleID = function() return "test.app" end,
     -- Model a native activation that succeeds without revealing the window's Space.
     activate = function() return true end,
@@ -33,7 +34,8 @@ local function selectApp(startSpace, cancel)
       get = function() return app end,
       pathForBundleID = function() return nil end,
       infoForBundlePath = function() return {CFBundleIdentifier = "test.app"} end,
-      applicationForPID = function(pid) assert(pid == 123); return app end,
+      applicationForPID = function(pid) assert(pid == 123); if not missedPID then return app end end,
+      applicationsForBundleID = function(bid) assert(bid == "test.app"); return {app} end,
     },
     settings = {get = function() end, set = function() end},
     json = {encode = function(v) return v end, decode = function(v) return v end},
@@ -84,4 +86,6 @@ switches, raises = selectApp(21, false)
 assert(switches == 0 and raises > 0, "leave already-visible desktops alone")
 switches, raises = selectApp(20, true)
 assert(switches == 0 and raises == 0, "respect a new user action")
+switches, raises = selectApp(20, false, true)
+assert(switches == 1 and raises > 0, "keep the hidden window ID when the same PID resolves by bundle ID")
 print("Cross-display selection passed")
