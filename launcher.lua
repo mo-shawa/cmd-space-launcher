@@ -20,23 +20,27 @@ local cache = {}
 
 local function rebuild()
   local choices, seen = {}, {}
+  local function addApp(path)
+    local info = hs.application.infoForBundlePath(path)
+    local bid = info and info.CFBundleIdentifier
+    if not bid or seen[bid] then return end
+    seen[bid] = true
+    table.insert(choices, {
+      text = path:match("([^/]+)%.app$"),
+      bundleID = bid,
+      path = path,
+      aliases = aliases[bid],
+    })
+  end
+
+  -- Finder lives in CoreServices alongside background helpers.
+  local finder = hs.application.pathForBundleID("com.apple.finder")
+  if finder then addApp(finder) end
   for _, dir in ipairs(dirs) do
     local ok, iter, data = pcall(hs.fs.dir, dir)
     if ok and iter then
       for file in iter, data do
-        if file:match("%.app$") then
-          local info = hs.application.infoForBundlePath(dir .. "/" .. file)
-          local bid = info and info.CFBundleIdentifier
-          if bid and not seen[bid] then
-            seen[bid] = true
-            table.insert(choices, {
-              text = (file:gsub("%.app$", "")),
-              bundleID = bid,
-              path = dir .. "/" .. file,
-              aliases = aliases[bid],
-            })
-          end
-        end
+        if file:match("%.app$") then addApp(dir .. "/" .. file) end
       end
     end
   end
@@ -64,7 +68,9 @@ end
 
 local function targetWindow(app)
   local preferred = app:focusedWindow() or app:mainWindow()
-  if preferred and preferred:id() and preferred:isVisible() then return preferred end
+  -- Finder's desktop can be the focused element, with window ID zero.
+  local id = preferred and preferred:id()
+  if id and id > 0 and preferred:isVisible() then return preferred end
   local minimized
   for _, window in ipairs(app:allWindows()) do
     if window:id() and window:isStandard() then

@@ -31,6 +31,7 @@ local function selectApp(startSpace, cancel)
     end},
     application = {
       get = function() return app end,
+      pathForBundleID = function() return nil end,
       infoForBundlePath = function() return {CFBundleIdentifier = "test.app"} end,
       applicationForPID = function(pid) assert(pid == 123); return app end,
     },
