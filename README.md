@@ -30,11 +30,29 @@ Tested on Apple silicon with macOS 15.6.1 and Hammerspoon 1.1.1.
 - When you pick an app after typing one to four characters, it comes first the next time you type those same characters. Choosing a different match updates that preference.
 - Press ↓ in an empty search to see your last 12 distinct launcher picks, newest first. The first ↓ selects the most recent app. Press Return to open it, or start typing to search normally.
 
+The list includes apps in the usual Applications folders, Finder, and standalone system utilities such as Keychain Access, Archive Utility, and Wireless Diagnostics. If Xcode is installed, its app folders contribute tools such as Simulator and Instruments. The launcher skips background agents in those extra folders and doesn't crawl through bundled helpers or plug-ins.
+
 The launcher stores up to 128 learned queries and 12 recent bundle IDs in this Mac’s Hammerspoon settings. Dismissing the panel records nothing. To clear both lists, run `hs.settings.clear("CmdSpaceLauncher.history.v1")` in the Hammerspoon Console.
+
+## Choose what Return does for an app
+
+Search for an app and highlight it. Click the gear or press **⌘,**. Click a choice (or press its number) to save it for that app on this Mac. Saving closes the panel without opening the app. **Esc** goes back without saving.
+
+| Choice | What happens when you press Return |
+| --- | --- |
+| **1 · Switch to the app** | The default. Go to its existing window, even on another Space. |
+| **2 · Open a new window here** | Ask the running app for a new window and bring that window to the desktop where you pressed ⌘Space. For example, open a fresh Finder window and leave the old one where it was. |
+| **3 · Bring an existing window here** | Bring one existing window to this desktop, preferring the app’s focused window. Other windows stay where they are. If the app has no window, ask it to reopen. |
+
+**⌥Return** uses the normal switch once without changing your saved choice. For a closed app, all three choices launch it once; the app controls any session it restores.
+
+You can opt in for any app. New-window mode looks for an enabled **File → New Window** (or Finder’s **New Finder Window**) in English. Apps that use a different menu title, open tabs, or only support one window may not work. The launcher tells you when it can’t complete the action. Both “here” modes need a regular desktop; they don’t force windows into or out of full screen or Split View. Moving windows uses macOS’s private Spaces interfaces, which can change between OS releases. The launcher checks the window actually arrived before focusing it.
+
+The single-window move fallback uses the SkyLight operation documented by [ferry](https://github.com/softmaxe/ferry) and [yabai](https://github.com/asmvik/yabai). It does not require either tool or changes to System Integrity Protection.
 
 ## Update or remove
 
-To update, run `brew upgrade --cask mo-shawa/tap/cmd-space-launcher` and reload Hammerspoon. Your history survives updates.
+To update, run `brew upgrade --cask mo-shawa/tap/cmd-space-launcher` and reload Hammerspoon. Your history and per-app choices survive updates.
 
 To uninstall, run `brew uninstall --cask mo-shawa/tap/cmd-space-launcher` and reload Hammerspoon. You can re-enable Spotlight under **System Settings → Keyboard → Keyboard Shortcuts → Spotlight**. The Space-switching preference is under **System Settings → Desktop & Dock → Mission Control**.
 

@@ -18,6 +18,7 @@ CONFIG = Path.home() / ".hammerspoon"
 STORE = CONFIG / ".cmd-space-launcher"
 LINK = CONFIG / "CmdSpaceLauncher"
 LOADER = b'require("CmdSpaceLauncher.launcher")'
+FILES = ("Launcher.swift", "launcher.lua", "window-actions.lua", "SpaceMover.m")
 # Only these exact prior standalone launcher configs can be replaced by the loader.
 STANDALONE = {
     "c593c5c12831f6a50edfd81bbe608fe1cbb560e480e26fc8823f1bd0f0426e30",
@@ -73,7 +74,9 @@ def write_config(stage, original, updated):
 
 def release_name(source):
     digest = hashlib.sha256(platform.machine().encode())
-    for filename in ("Launcher.swift", "launcher.lua"):
+    for filename in FILES:
+        if filename not in FILES[:2] and not (source / filename).exists():
+            continue  # v1.0.x only shipped the first two sources.
         digest.update((source / filename).read_bytes())
     return "release-" + digest.hexdigest()[:16]
 
@@ -95,10 +98,12 @@ def install():
         if not release.exists():
             build = stage / "release"
             build.mkdir()
-            for filename in ("Launcher.swift", "launcher.lua"):
+            for filename in FILES:
                 shutil.copyfile(SOURCE / filename, build / filename)
             subprocess.run(["xcrun", "swiftc", "-O", str(build / "Launcher.swift"),
                             "-o", str(build / "AppSearch")], check=True)
+            subprocess.run(["xcrun", "clang", "-O2", "-fobjc-arc", "-framework", "AppKit",
+                            str(build / "SpaceMover.m"), "-o", str(build / "SpaceMover")], check=True)
             build.rename(release)
         next_link = stage / "link"
         next_link.symlink_to(release.relative_to(CONFIG))
@@ -128,7 +133,7 @@ def uninstall():
             if release.is_symlink() or not release.is_dir():
                 continue
             files = list(release.iterdir())
-            if {p.name for p in files} != {"AppSearch", "Launcher.swift", "launcher.lua"}:
+            if {p.name for p in files} not in ({"AppSearch", "SpaceMover", *FILES}, {"AppSearch", *FILES[:2]}):
                 continue
             if all(p.is_file() and not p.is_symlink() for p in files) and release.name == release_name(release):
                 shutil.rmtree(release)

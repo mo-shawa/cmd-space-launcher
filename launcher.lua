@@ -17,13 +17,21 @@ local aliases = {
   ["com.openai.codex"] = { "codex" },
 }
 local cache = {}
+local utilityDir = "/System/Library/CoreServices/Applications"
+-- The rest of CoreServices is mostly agents and setup workflows, even among
+-- bundles that don't declare LSUIElement. Include only known standalone tools.
+local systemApps = {"com.apple.finder", "com.apple.installer", "com.apple.CertificateAssistant",
+  "com.apple.AVB-Audio-Configuration", "com.apple.displaycalibrator"}
+local function flag(value) return value == true or value == 1 or value == "1" or value == "YES" end
 
 local function rebuild()
   local choices, seen = {}, {}
-  local function addApp(path)
+  local function addApp(path, utility)
     local info = hs.application.infoForBundlePath(path)
     local bid = info and info.CFBundleIdentifier
     if not bid or seen[bid] then return end
+    if utility and (flag(info.LSBackgroundOnly) or
+        (flag(info.LSUIElement) and bid ~= "com.apple.AboutThisMacLauncher")) then return end
     seen[bid] = true
     table.insert(choices, {
       text = path:match("([^/]+)%.app$"),
@@ -33,16 +41,24 @@ local function rebuild()
     })
   end
 
-  -- Finder lives in CoreServices alongside background helpers.
-  local finder = hs.application.pathForBundleID("com.apple.finder")
-  if finder then addApp(finder) end
-  for _, dir in ipairs(dirs) do
+  local function scan(dir, utility)
     local ok, iter, data = pcall(hs.fs.dir, dir)
     if ok and iter then
       for file in iter, data do
-        if file:match("%.app$") then addApp(dir .. "/" .. file) end
+        if file:match("%.app$") then addApp(dir .. "/" .. file, utility) end
       end
     end
+  end
+  for _, dir in ipairs(dirs) do scan(dir, false) end
+  scan(utilityDir, true)
+  for _, id in ipairs(systemApps) do
+    local path = hs.application.pathForBundleID(id)
+    if path then addApp(path, true) end
+  end
+  local xcode = hs.application.pathForBundleID("com.apple.dt.Xcode")
+  if xcode then
+    scan(xcode .. "/Contents/Applications", true)
+    scan(xcode .. "/Contents/Developer/Applications", true)
   end
   table.sort(choices, function(a, b) return a.text:lower() < b.text:lower() end)
   cache = choices
@@ -64,6 +80,15 @@ local focusTimer, inputGuard
 local function cancelPendingFocus()
   if focusTimer then focusTimer:stop(); focusTimer = nil end
   if inputGuard then inputGuard:stop(); inputGuard = nil end
+end
+
+local function guardInput()
+  local events = hs.eventtap.event.types
+  inputGuard = hs.eventtap.new({events.leftMouseDown, events.rightMouseDown, events.otherMouseDown,
+    events.keyDown, events.scrollWheel}, function()
+    cancelPendingFocus()
+    return false
+  end):start()
 end
 
 local function targetWindow(app)
@@ -109,7 +134,7 @@ local function locateWindow(id, window, hints)
   return id
 end
 
-local function goTo(choice, hints)
+local function goTo(choice, hints, mode, origin)
   cancelPendingFocus()
   if not choice then return end
   local bid = choice.bundleID
@@ -117,6 +142,15 @@ local function goTo(choice, hints)
   if not app or app:bundleID() ~= bid then
     app = hs.application.applicationsForBundleID(bid)[1]
     hints = nil
+  end
+
+  if mode == "new" or mode == "bring" then
+    guardInput()
+    require("CmdSpaceLauncher.window-actions").run(choice, app, hints, mode, origin, {
+      stop = cancelPendingFocus,
+      after = function(delay, fn) focusTimer = hs.timer.doAfter(delay, fn) end,
+    })
+    return
   end
 
   if not app then
@@ -128,12 +162,7 @@ local function goTo(choice, hints)
   local targetID = preferred and preferred:id()
   app:activate()
   -- A click or keypress starts a new action. Let it take precedence over a delayed raise.
-  local events = hs.eventtap.event.types
-  inputGuard = hs.eventtap.new({events.leftMouseDown, events.rightMouseDown, events.otherMouseDown,
-    events.keyDown, events.scrollWheel}, function()
-    cancelPendingFocus()
-    return false
-  end):start()
+  guardInput()
 
   local switched, waitUntil
   local function raiseWindow(final)
@@ -184,6 +213,7 @@ end
 local panelTask
 local panelPath = hs.configdir .. "/CmdSpaceLauncher/AppSearch"
 local historyKey = "CmdSpaceLauncher.history.v1"
+local rulesKey = "CmdSpaceLauncher.behaviors.v1"
 
 local function remember(bundleID, query)
   local history = hs.settings.get(historyKey) or {}
@@ -209,6 +239,8 @@ local hotkey = hs.hotkey.bind({ "cmd" }, "space", function()
     return
   end
   local choices = cache
+  local rules = hs.settings.get(rulesKey) or {}
+  local origin = hs.spaces.focusedSpace()
   local task
   task = hs.task.new(panelPath, function(status, output, errors)
     if panelTask == task then panelTask = nil end
@@ -221,8 +253,17 @@ local hotkey = hs.hotkey.bind({ "cmd" }, "space", function()
     if not selection then return end
     for _, choice in ipairs(choices) do
       if choice.bundleID == selection.bundleID then
+        if selection.saveMode then
+          local mode = selection.saveMode
+          if mode ~= "switch" and mode ~= "new" and mode ~= "bring" then return end
+          local current = hs.settings.get(rulesKey) or {}
+          current[choice.bundleID] = mode ~= "switch" and mode or nil
+          hs.settings.set(rulesKey, current)
+          return
+        end
         remember(choice.bundleID, selection.shortQuery)
-        goTo(choice, selection.windows)
+        local mode = not selection.switchOnce and rules[choice.bundleID]
+        goTo(choice, selection.windows, mode, origin)
         return
       end
     end
@@ -233,6 +274,7 @@ local hotkey = hs.hotkey.bind({ "cmd" }, "space", function()
       choices = #choices > 0 and choices or nil,
       learned = history.learned,
       recent = history.recent,
+      rules = next(rules) and rules or nil,
       -- Keep an empty catalog a JSON object on a fresh install.
       version = 1,
     }))

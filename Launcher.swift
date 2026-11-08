@@ -30,12 +30,26 @@ struct SearchIndex: Decodable {
     let choices: [AppChoice]?
     let recent: [String]?
     let learned: [LearnedPick]?
+    let rules: [String: String]?
+}
+
+enum WindowMode: String, CaseIterable {
+    case `switch`, new, bring
+    var title: String {
+        switch self {
+        case .switch: return "Switch to the app"
+        case .new: return "Open a new window here"
+        case .bring: return "Bring an existing window here"
+        }
+    }
 }
 
 struct Selection: Encodable {
     let bundleID: String
     let shortQuery: String?
     let windows: WindowHints?
+    let saveMode: String?
+    let switchOnce: Bool?
 }
 
 struct WindowHints: Encodable {
@@ -43,13 +57,18 @@ struct WindowHints: Encodable {
     let ids: [CGWindowID]
 
     init?(bundleID: String) {
-        guard let app = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).first,
-              let rows = CGWindowListCopyWindowInfo([.optionAll, .excludeDesktopElements], 0) as? [[String: Any]] else { return nil }
+        guard let app = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).first else { return nil }
+        self.init(app: app)
+    }
+    init?(app: NSRunningApplication) {
+        guard let rows = CGWindowListCopyWindowInfo([.optionAll, .excludeDesktopElements], 0) as? [[String: Any]] else { return nil }
         pid = app.processIdentifier
         // Accessibility can omit an app's windows while their display shows another Space.
         ids = rows.compactMap { row in
             guard row[kCGWindowOwnerPID as String] as? pid_t == app.processIdentifier,
-                  row[kCGWindowLayer as String] as? Int == 0 else { return nil }
+                  row[kCGWindowLayer as String] as? Int == 0,
+                  let bounds = row[kCGWindowBounds as String] as? [String: CGFloat],
+                  (bounds["Width"] ?? 0) > 1, (bounds["Height"] ?? 0) > 1 else { return nil }
             return row[kCGWindowNumber as String] as? CGWindowID
         }
     }
@@ -88,6 +107,12 @@ final class Launcher: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTextF
     private let scroll = NSScrollView()
     private let table = NSTableView()
     private let empty = NSTextField(labelWithString: "No matching apps")
+    private let gear = NSButton()
+    private let settingsTitle = NSTextField(labelWithString: "")
+    private let settingsHelp = NSTextField(labelWithString: "Press 1–3 to save, or Esc to go back.")
+    private var modeButtons: [NSButton] = []
+    private var editing: AppChoice?
+    private var keyMonitor: Any?
     private let panel = SearchPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel],
                                     backing: .buffered, defer: false)
     private let icons = NSCache<NSString, NSImage>()
@@ -160,7 +185,41 @@ final class Launcher: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTextF
         table.target = self
         table.action = #selector(clickResult)
         scroll.documentView = table
-        [searchIcon, field, separator, scroll, empty].forEach(surface.addSubview)
+        gear.bezelStyle = .accessoryBarAction
+        gear.isBordered = false
+        gear.image = NSImage(systemSymbolName: "gearshape", accessibilityDescription: "App behavior")
+        gear.contentTintColor = .secondaryLabelColor
+        gear.toolTip = "Behavior for the selected app (⌘,)"
+        gear.setAccessibilityLabel("Behavior for the selected app")
+        gear.target = self
+        gear.action = #selector(toggleSettings)
+        settingsTitle.font = .systemFont(ofSize: 14, weight: .semibold)
+        settingsHelp.font = .systemFont(ofSize: 12)
+        settingsHelp.textColor = .secondaryLabelColor
+        [searchIcon, field, separator, scroll, empty, gear, settingsTitle, settingsHelp].forEach(surface.addSubview)
+        modeButtons = WindowMode.allCases.enumerated().map { i, mode in
+            let b = NSButton(radioButtonWithTitle: mode.title, target: self, action: #selector(saveBehavior(_:)))
+            b.tag = i
+            surface.addSubview(b)
+            return b
+        }
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self else { return event }
+            let flags = event.modifierFlags.intersection([.command, .option, .control, .shift])
+            if flags == .command && event.charactersIgnoringModifiers == "," {
+                self.toggleSettings(); return nil
+            }
+            if self.editing != nil {
+                if flags.isEmpty, let key = event.charactersIgnoringModifiers,
+                   let i = ["1", "2", "3"].firstIndex(of: key) {
+                    self.saveBehavior(self.modeButtons[i]); return nil
+                }
+                if event.keyCode == 53 { self.toggleSettings(); return nil }
+            } else if flags == .option && (event.keyCode == 36 || event.keyCode == 76) {
+                self.choose(row: self.table.selectedRow, switchOnce: true); return nil
+            }
+            return event
+        }
         layout()
         panel.makeKeyAndOrderFront(nil)
         panel.orderFrontRegardless()
@@ -171,19 +230,29 @@ final class Launcher: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTextF
         let width = min(620, screenFrame.width - 40)
         let expanded = showingRecent || !query.isEmpty
         let listHeight = CGFloat(min(matches.count, 7)) * 42 + 20
-        let height: CGFloat = 62 + (expanded ? (matches.isEmpty ? 44 : listHeight) : 0)
+        let height: CGFloat = 62 + (editing != nil ? 145 : (expanded ? (matches.isEmpty ? 44 : listHeight) : 0))
         let top = max(screenFrame.minY + height + 8, screenFrame.maxY - screenFrame.height * 0.24)
         panel.setFrame(NSRect(x: (screenFrame.midX - width / 2).rounded(), y: (top - height).rounded(),
                               width: width, height: height), display: true)
         searchIcon.frame = NSRect(x: 20, y: 18, width: 26, height: 26)
         field.frame = NSRect(x: 58, y: (62 - field.intrinsicContentSize.height) / 2,
-                             width: width - 80, height: field.intrinsicContentSize.height)
+                             width: width - 112, height: field.intrinsicContentSize.height)
+        gear.isHidden = matches.isEmpty
+        gear.frame = NSRect(x: width - 52, y: 17, width: 32, height: 28)
+        settingsTitle.isHidden = editing == nil
+        settingsHelp.isHidden = editing == nil
+        settingsTitle.frame = NSRect(x: 23, y: 73, width: width - 46, height: 20)
+        settingsHelp.frame = NSRect(x: 23, y: 181, width: width - 46, height: 18)
+        for (i, button) in modeButtons.enumerated() {
+            button.isHidden = editing == nil
+            button.frame = NSRect(x: 21, y: 97 + 26 * CGFloat(i), width: width - 42, height: 23)
+        }
         separator.frame = NSRect(x: 0, y: 61, width: width, height: 1)
         separator.isHidden = !expanded
         empty.stringValue = showingRecent ? "No recent apps yet" : "No matching apps"
         empty.isHidden = !expanded || !matches.isEmpty
         empty.frame = NSRect(x: 23, y: 74, width: width - 46, height: 20)
-        scroll.isHidden = matches.isEmpty
+        scroll.isHidden = matches.isEmpty || editing != nil
         scroll.hasVerticalScroller = matches.count > 7
         scroll.frame = NSRect(x: 4, y: 62, width: width - 8, height: max(0, height - 62))
         table.sizeLastColumnToFit()
@@ -191,6 +260,7 @@ final class Launcher: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTextF
     }
 
     func controlTextDidChange(_ notification: Notification) {
+        editing = nil
         showingRecent = false
         refreshMatches()
     }
@@ -261,6 +331,7 @@ final class Launcher: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTextF
     }
 
     func control(_ control: NSControl, textView: NSTextView, doCommandBy command: Selector) -> Bool {
+        if editing != nil { return false }
         switch command {
         case #selector(NSResponder.moveDown(_:)):
             if query.isEmpty && !showingRecent {
@@ -277,19 +348,40 @@ final class Launcher: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTextF
         return true
     }
 
+    @objc private func toggleSettings() {
+        if editing != nil {
+            editing = nil
+        } else if matches.indices.contains(table.selectedRow) {
+            let app = matches[table.selectedRow]
+            editing = app
+            settingsTitle.stringValue = "When I choose " + app.text
+            let current = index.rules?[app.bundleID] ?? WindowMode.switch.rawValue
+            for (i, button) in modeButtons.enumerated() {
+                button.state = WindowMode.allCases[i].rawValue == current ? .on : .off
+            }
+        }
+        layout()
+        panel.makeFirstResponder(field)
+    }
+    @objc private func saveBehavior(_ sender: NSButton) {
+        guard let app = editing else { return }
+        finish(app.bundleID, saveMode: WindowMode.allCases[sender.tag])
+    }
     @objc private func clickResult() { choose(row: table.clickedRow) }
-    private func choose(row: Int) {
-        if matches.indices.contains(row) { finish(matches[row].bundleID) }
+    private func choose(row: Int, switchOnce: Bool = false) {
+        if editing == nil && matches.indices.contains(row) { finish(matches[row].bundleID, switchOnce: switchOnce) }
     }
     func windowDidResignKey(_ notification: Notification) { finish() }
 
-    private func finish(_ bundleID: String? = nil) {
+    private func finish(_ bundleID: String? = nil, saveMode: WindowMode? = nil, switchOnce: Bool = false) {
         guard !finishing else { return }
         finishing = true
+        if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
         panel.orderOut(nil)
         if let bundleID {
             let selection = Selection(bundleID: bundleID, shortQuery: (1...4).contains(query.count) ? query : nil,
-                                      windows: WindowHints(bundleID: bundleID))
+                                      windows: saveMode == nil ? WindowHints(bundleID: bundleID) : nil,
+                                      saveMode: saveMode?.rawValue, switchOnce: switchOnce ? true : nil)
             if let data = try? JSONEncoder().encode(selection) { FileHandle.standardOutput.write(data) }
         }
         NSApp.terminate(nil)
@@ -297,6 +389,13 @@ final class Launcher: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTextF
 }
 
 do {
+    if CommandLine.arguments.count == 3 && CommandLine.arguments[1] == "--windows" {
+        guard let pid = pid_t(CommandLine.arguments[2]), pid > 0,
+              let app = NSRunningApplication(processIdentifier: pid),
+              let snapshot = WindowHints(app: app) else { exit(1) }
+        FileHandle.standardOutput.write(try JSONEncoder().encode(snapshot))
+        exit(0)
+    }
     let index = try JSONDecoder().decode(SearchIndex.self, from: FileHandle.standardInput.readDataToEndOfFile())
     let app = NSApplication.shared
     app.setActivationPolicy(.accessory)
